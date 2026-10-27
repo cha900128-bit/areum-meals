@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>아름고등학교 오늘의 급식</title>
+<style>
+:root{color-scheme:light;font-family:system-ui,-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif}
+*{box-sizing:border-box}html,body{margin:0;padding:0;background:transparent;width:100%;overflow-x:hidden}
+body{color:#1f2937;font-size:13px}
+.card{width:100%;max-width:420px;margin:0 auto;padding:13px 11px 11px;border:1px solid #e3e6ec;border-radius:12px;background:white;text-align:center}
+.heading{display:grid;grid-template-columns:32px minmax(0,1fr) 32px;align-items:center;gap:3px}
+.heading h1{font-size:14px;font-weight:760;letter-spacing:-.4px;margin:0;line-height:1.5;white-space:normal;word-break:keep-all}
+.arrow{background:#fff;border:1px solid #e1e5ec;border-radius:7px;height:30px;cursor:pointer;color:#45576e;font-size:23px;display:flex;align-items:center;justify-content:center}
+.arrow:hover,.arrow:focus-visible{background:#ecf3fb;outline:1px solid #aac8e8}
+hr{border:0;border-top:1px solid #eff0f3;margin:12px 4px}
+#menu{min-height:48px;word-break:keep-all;overflow-wrap:anywhere;font-size:14px;line-height:1.7;font-weight:550;text-align:center}
+.menu-item{margin:0 0 4px}.message{font-size:12px;color:#6b7280;line-height:1.6;padding:10px 3px}
+#status{font-size:10px;color:#87909e;margin-top:9px;line-height:1.4}
+.footer{margin-top:11px;border-top:1px solid #eff0f3;padding-top:8px;font-size:11px}
+a{color:#2e6ea3;text-decoration:underline;text-underline-offset:3px}
+</style>
+</head>
+<body>
+<section class="card" aria-label="아름고등학교 급식 식단표">
+  <div class="heading">
+    <button id="prev" class="arrow" aria-label="이전 식단" type="button">‹</button>
+    <h1 id="title">오늘의 급식</h1>
+    <button id="next" class="arrow" aria-label="다음 식단" type="button">›</button>
+  </div>
+  <hr>
+  <div id="menu" role="status" aria-live="polite">메뉴 정보를 불러오는 중입니다.</div>
+  <div id="status"></div>
+  <div class="footer"><a href="https://areum.sjeduhs.kr/areum-h/ad/fm/foodmenu/selectFoodMenuView.do?mi=7229" target="_blank" rel="noopener noreferrer">아름고등학교 공식 식단표</a></div>
+</section>
+<script>
+(()=>{
+"use strict";
+const MS=86400000,WEEK=['일','월','화','수','목','금','토'];
+const $=id=>document.getElementById(id);
+let database={meals:{},sources:{}},baseSlot=null,shownSlot=null;
+function kst(){
+ const p=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',hourCycle:'h23'}).formatToParts(new Date());
+ return Object.fromEntries(p.filter(x=>x.type!=='literal').map(x=>[x.type,Number(x.value)]));
+}
+function autoSlot(){const p=kst();return Math.floor(Date.UTC(p.year,p.month-1,p.day)/MS)*2+(p.hour>=14?1:0)}
+function identify(slot){
+ const date=new Date(Math.floor(slot/2)*MS),ymd=date.getUTCFullYear()+String(date.getUTCMonth()+1).padStart(2,'0')+String(date.getUTCDate()).padStart(2,'0');
+ return {ymd,meal:slot%2?'3':'2',title:(date.getUTCMonth()+1)+'월 '+date.getUTCDate()+'일('+WEEK[date.getUTCDay()]+') '+(slot%2?'저녁':'점심')};
+}
+function message(v){const e=document.createElement('div');e.className='message';e.textContent=v;$('menu').replaceChildren(e)}
+function render(){
+ if(shownSlot===null)return;
+ const s=identify(shownSlot), items=database.meals?.[s.ymd]?.[s.meal],origin=database.sources?.[s.ymd]||'';
+ $('title').textContent=s.title;
+ if(Array.isArray(items)&&items.length){
+ const fragment=document.createDocumentFragment();
+ items.forEach(item=>{const e=document.createElement('div');e.className='menu-item';e.textContent=item;fragment.append(e)});
+ $('menu').replaceChildren(fragment);
+ }else if(!database.generated_at){message('급식 데이터가 아직 게시되지 않았습니다. 아래 공식 식단표를 확인해 주세요.')}
+ else if(Object.keys(database.meals||{}).length===0){message('급식 데이터 갱신에 실패했습니다. 아래 공식 식단표를 확인해 주세요.')}
+ else if(s.ymd<database.range?.[0]?.replaceAll('-','')||s.ymd>database.range?.[1]?.replaceAll('-','')){
+ message('조회 가능한 기간 밖입니다. 아래 학교 공식 식단표를 확인해 주세요.');
+ }else{message('선택한 날짜의 '+(s.meal==='2'?'점심':'저녁')+' 식단이 등록되어 있지 않습니다.')}
+ $('status').textContent=origin?origin+' · 급식 자료 자동 갱신':database.generated_at?'마지막 갱신: '+database.generated_at.replace('T',' ').slice(0,16)+' (한국시간)':'';
+}
+async function update(){
+ try{
+ const response=await fetch('./data/meals.json?refresh='+Date.now(),{cache:'no-store'});
+ if(!response.ok)throw Error('HTTP '+response.status);
+ const x=await response.json();if(!x||typeof x.meals!=='object')throw Error('invalid');
+ database=x;render();
+ }catch(_){if(!database.generated_at){message('급식 데이터가 준비되지 않았습니다. 잠시 후 새로고침하거나 공식 식단표를 확인해 주세요.');}}
+}
+function tick(){const n=autoSlot();if(n!==baseSlot){baseSlot=n;shownSlot=n;render()}}
+$('prev').onclick=()=>{shownSlot--;render()};$('next').onclick=()=>{shownSlot++;render()};
+document.addEventListener('visibilitychange',()=>{if(!document.hidden){tick();update()}});
+tick();update();setInterval(tick,20000);setInterval(update,30*60*1000);
+})();
+</script>
+</body>
+</html>
